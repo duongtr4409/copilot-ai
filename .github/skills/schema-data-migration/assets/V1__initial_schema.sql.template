@@ -1,0 +1,17 @@
+-- V1__initial_schema.sql
+-- Purpose: bootstrap initial SQL schema
+-- Notes: keep DDL deterministic and environment-agnostic
+
+BEGIN;
+
+-- Example table; replace with domain-specific entities
+CREATE TABLE IF NOT EXISTS app_user (
+    id BIGSERIAL PRIMARY KEY,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    full_name VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_user_email ON app_user(email);
+
+COMMIT;

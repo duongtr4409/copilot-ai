@@ -1,0 +1,24 @@
+databaseChangeLog:
+  - changeSet:
+      id: V1-initial-schema
+      author: team
+      labels: baseline
+      context: dev,staging,prod
+      comment: Bootstrap initial schema
+      changes:
+        - sqlFile:
+            path: ./V1__initial_schema.sql.template
+            relativeToChangelogFile: true
+            splitStatements: true
+            stripComments: false
+
+  # Add next versions as separate changeSets:
+  # - changeSet:
+  #     id: V2-add-index-user-email
+  #     author: team
+  #     labels: online-safe
+  #     context: dev,staging,prod
+  #     changes:
+  #       - sqlFile:
+  #           path: ./V2__add_index_user_email.sql
+  #           relativeToChangelogFile: true

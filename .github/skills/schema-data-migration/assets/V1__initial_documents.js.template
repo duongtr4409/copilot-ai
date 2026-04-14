@@ -1,0 +1,24 @@
+// V1__initial_documents.js
+// Purpose: bootstrap initial NoSQL collections and indexes
+// Notes: keep operations idempotent
+
+module.exports = {
+  async up(db) {
+    const collections = await db.listCollections({}, { nameOnly: true }).toArray();
+    const names = new Set(collections.map(c => c.name));
+
+    if (!names.has('app_user')) {
+      await db.createCollection('app_user');
+    }
+
+    await db.collection('app_user').createIndex({ email: 1 }, { unique: true, name: 'ux_app_user_email' });
+    await db.collection('app_user').createIndex({ createdAt: 1 }, { name: 'ix_app_user_createdAt' });
+  },
+
+  async down(db) {
+    // Keep down migration conservative in production.
+    await db.collection('app_user').dropIndex('ux_app_user_email').catch(() => {});
+    await db.collection('app_user').dropIndex('ix_app_user_createdAt').catch(() => {});
+    await db.collection('app_user').drop().catch(() => {});
+  }
+};
