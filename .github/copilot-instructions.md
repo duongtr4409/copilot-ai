@@ -69,3 +69,22 @@ Approved artifact locations:
   - Tables for structured comparisons/checklists.
   - Mermaid diagrams when flow or state explanation is needed.
 - Avoid long wall-of-text paragraphs; keep outputs concise, structured, and action-oriented.
+
+## 8) Skill-to-Agent Mapping
+- Agents SHOULD invoke relevant skills when their workflow matches a skill's purpose.
+- Skill invocation is recommended, not mandatory, unless a quality gate depends on it.
+
+| Skill | Primary Agents | Trigger Context |
+|---|---|---|
+| `api-contract-first-development` | @tech-lead, @java-backend-developer, @angular-senior-developer, @react-expert-developer | New API design, FE/BE parallel delivery, contract drift review |
+| `automated-quality-gate` | @qa-tester, @code-reviewer, @ba | BA-to-code alignment, AC coverage audit, edge-case test hardening |
+| `clean-code-patterns-enforcement` | @code-reviewer, @java-backend-developer, @angular-senior-developer, @react-expert-developer | Code review, refactoring, SOLID/DRY enforcement |
+| `context-synchronization` | @pmo, all agents | Multi-agent handoff, parallel work, PROJECT_STATE updates |
+| `product-value-analysis` | @pmo, @ba, @pa | Backlog prioritization, scope negotiation, feature cost-benefit |
+| `schema-data-migration` | @sql-database-specialist, @nosql-database-specialist, @tech-lead | Schema design, migration planning, environment sync |
+| `security-vulnerability-scanning` | @security-auditor, @code-reviewer, @devops-infrastructure-sre | Pre-merge security scan, dependency audit, secrets detection |
+| `system-design-reasoning` | @tech-lead, @ba, @pa | Architecture decomposition, module boundaries, data flow design |
+| `automated-knowledge-synthesis` | @technical-writer, @pmo | Post-merge docs update, changelog, decision explanations |
+| `git-workflow-enforcement` | @pmo, @code-reviewer, all developers | Branch naming, commit conventions, PR compliance |
+| `test-automation-scaffolding` | @qa-tester, @java-backend-developer, @angular-senior-developer, @react-expert-developer | Generate test scaffolds from AC, bootstrap test suites |
+| `performance-profiling-analysis` | @java-backend-developer, @sql-database-specialist, @qa-tester, @devops-infrastructure-sre | API profiling, DB query optimization, load test analysis |

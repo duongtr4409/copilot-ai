@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json.schemastore.org/copilot-mcp.json",
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "_comment": "Tier 1 — Core: Create/read issues, PRs, branches, reviews. Used by PMO, Code Reviewer, QA, All Devs."
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "./"],
+      "env": {},
+      "_comment": "Tier 1 — Core: Safe file read/write in project. Used by all agents."
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+      "env": {},
+      "_comment": "Tier 1 — Core: Structured multi-step reasoning. Used by Tech Lead, BA, PA, PMO."
+    },
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "env": {},
+      "_comment": "Tier 2 — Important: Persistent context across conversations. Used by PMO for project state."
+    },
+    "postgres": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres"],
+      "env": {
+        "DATABASE_URL": "${DATABASE_URL}"
+      },
+      "_comment": "Tier 2 — Important: Direct DB queries, schema validation, EXPLAIN analysis. Used by SQL Specialist, Java Backend."
+    },
+    "brave-search": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": "${BRAVE_API_KEY}"
+      },
+      "_comment": "Tier 2 — Important: Search docs, CVE databases, best practices. Used by Security Auditor, Tech Lead."
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@executeautomation/playwright-mcp-server"],
+      "env": {},
+      "_comment": "Tier 3 — Advanced: E2E browser testing automation. Used by QA/Tester."
+    }
+  }
+}
