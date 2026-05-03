@@ -3071,3 +3071,514 @@ Trải nghiệm này đã thay đổi hoàn toàn tư duy lập trình của tô
 ---
 
 
+# Bạn thiết kế một hệ thống Java phục vụ lượng request tăng 10x: bạn thay đổi gì trước?
+
+>Câu hỏi này không yêu cầu bạn vẽ ra một kiến trúc “hoành tráng”. Điều quan trọng là cho thấy bạn biết ưu tiên và không làm mọi thứ cùng lúc.
+>*   **Điểm nghẽn đầu tiên bạn nghi ngờ khi traffic tăng**
+>*   **Cách bạn xác định bottleneck thật sự nằm ở đâu**
+>*   **Những thay đổi mang lại hiệu quả nhanh nhất**
+>*   **Trải nghiệm khi scale sai chỗ và phải quay lại**
+
+## Thiết kế Hệ thống Java phục vụ Traffic tăng 10x: Tư duy Ưu tiên
+
+Khi đối mặt với bài toán hệ thống Java cần phục vụ lượng request tăng gấp 10 lần, tư duy của tôi không phải là "đập đi xây lại" mà là tìm ra điểm nghẽn (bottleneck) lớn nhất để xử lý trước. Trong các dự án như **E-Office** hay hệ thống của **Tổng cục Hải quan**, việc scale hệ thống luôn bắt đầu từ những thay đổi mang tính cốt lõi nhưng thực dụng nhất.
+
+---
+
+### 1. Điểm nghẽn đầu tiên tôi nghi ngờ
+Khi traffic tăng 10x, tôi sẽ nghi ngờ 3 khu vực này theo thứ tự:
+
+*   **Database (DB) Connections & Locks:** Đây là điểm nghẽn phổ biến nhất. DB có giới hạn về số lượng kết nối đồng thời và các câu lệnh `Update`/`Delete` có thể gây ra hiện tượng khóa hàng (row locking), làm tắc nghẽn toàn bộ luồng xử lý.
+*   **Thread Pool của Web Server:** Trong Spring Boot/Tomcat, số lượng thread mặc định thường chỉ khoảng 200. Nếu request xử lý chậm, các thread này sẽ bị chiếm dụng hết, dẫn đến tình trạng treo API.
+*   **External API & Network:** Nếu hệ thống gọi sang bên thứ ba (như dịch vụ ký số hoặc thanh toán), sự chậm trễ từ phía họ sẽ kéo sập hệ thống của tôi theo hiệu ứng domino.
+
+### 2. Cách xác định Bottleneck thật sự
+Tôi không đoán mò mà dựa vào dữ liệu đo lường:
+
+*   **Monitoring (Prometheus/Grafana):** Theo dõi biểu đồ sử dụng CPU, RAM và đặc biệt là **Connection Pool usage**. Nếu pool luôn ở trạng thái "full", DB chính là nguyên nhân.
+*   **Tracing (Jaeger/Zipkin):** Theo dõi một request đi qua các tầng. Nếu tầng Service mất 5ms nhưng tầng Repository mất 2s, lỗi chắc chắn nằm ở SQL hoặc Index.
+*   **Load Testing (JMeter/K6):** Giả lập tải tăng dần để xem hệ thống "gãy" ở đâu trước. Đây là cách thực tế nhất để kiểm chứng sức chịu tải.
+
+### 3. Những thay đổi mang lại hiệu quả nhanh nhất
+Thay vì chuyển sang Microservices ngay lập tức, tôi sẽ thực hiện các bước **"Quick Win"** sau:
+
+*   **Tối ưu hóa Database:**
+    *   **Thêm Index:** Đảm bảo các câu query hay dùng đều được đánh Index.
+    *   **Read/Write Splitting:** Tách riêng một DB chuyên để đọc (Replica) để giảm tải cho DB chính.
+*   **Áp dụng Caching (Redis):** Đưa các dữ liệu ít thay đổi (danh mục, cấu hình) lên Cache. Đây là cách nhanh nhất để giảm tải trực tiếp cho Database.
+*   **Scale Horizontal (Mở rộng hàng ngang):** Chạy nhiều instance nhỏ hơn đằng sau một Load Balancer (Nginx/HAProxy) thay vì dùng 1 server cực mạnh.
+*   **Điều chỉnh Pool Size:** Tăng kích thước **HikariCP** (DB pool) và Tomcat thread pool phù hợp với cấu hình phần cứng.
+
+### 4. Trải nghiệm khi scale sai chỗ
+Tại **2B System Corporation**, tôi từng mắc một sai lầm đáng nhớ:
+
+*   **Sai lầm:** Khi thấy hệ thống chậm lúc traffic tăng, tôi ngay lập tức yêu cầu nâng cấp RAM và CPU cho Server ứng dụng (Vertical Scaling).
+*   **Kết quả:** Hệ thống vẫn chậm y như cũ, trong khi chi phí server tăng gấp đôi.
+*   **Nguyên nhân:** Sau khi đo lường lại, tôi phát hiện một câu truy vấn tìm kiếm hồ sơ không sử dụng Index, dẫn đến **Full Table Scan**. Khi traffic tăng, hàng trăm câu query này "vắt kiệt" ổ đĩa của Database.
+*   **Bài học:** Nâng cấp phần cứng mà không tối ưu logic code/DB chỉ là cách "đốt tiền" để che giấu sự yếu kém về kiến trúc.
+
+---
+**Nguyên tắc của tôi:** Luôn ưu tiên tối ưu hóa (Optimization) trước khi mở rộng (Scaling). Một dòng code hiệu quả có thể giá trị hơn cả chục server đắt tiền.
+
+
+---
+
+
+# Bạn chọn monolith hay microservices cho sản phẩm mới? Tiêu chí quyết định là gì?
+
+>Câu hỏi này không có đáp án đúng duy nhất. Người phỏng vấn muốn thấy bạn hiểu rõ cái giá phải trả và sự đánh đổi của mỗi lựa chọn kiến trúc.
+>*   **Bối cảnh sản phẩm và team bạn từng làm**
+>*   **Tiêu chí bạn dùng để ra quyết định**
+>*   **Rủi ro khi chọn microservices quá sớm**
+>*   **Khi nào monolith lại là lựa chọn tốt hơn**
+
+## Kiến trúc Hệ thống: Monolith hay Microservices?
+
+> **Lưu ý:** Câu hỏi này không có đáp án đúng duy nhất. Mục tiêu của người phỏng vấn là đánh giá sự hiểu biết của bạn về sự đánh đổi (**trade-offs**) và khả năng lựa chọn giải pháp thực tế thay vì chạy theo xu hướng công nghệ.
+
+---
+
+### 1. Bối cảnh Sản phẩm và Đội ngũ (Team)
+Việc chọn kiến trúc phụ thuộc rất lớn vào "con người" và "mục tiêu":
+
+*   **Quy mô Team:** Một team nhỏ (3-5 người) thường khó vận hành tốt hàng chục service riêng biệt.
+*   **Kinh nghiệm:** Team đã có kinh nghiệm về DevOps, CI/CD, Monitoring và Distributed Tracing chưa?
+*   **Giai đoạn sản phẩm:** Sản phẩm đang ở mức ý tưởng (MVP) cần ra mắt nhanh hay đã định hình rõ ràng và cần scale cực lớn?
+
+### 2. Tiêu chí ra quyết định (Decision Criteria)
+Tôi thường dựa trên 3 trụ cột chính:
+
+*   **Độ phức tạp của Business:** Nếu các module có tính độc lập cao (ví dụ: Thanh toán vs. Kho vận) và quy trình nghiệp vụ cực kỳ phức tạp, Microservices giúp "chia để trị".
+*   **Nhu cầu Scale độc lập:** Nếu một tính năng (như Xử lý video) ngốn tài nguyên hơn hẳn các phần khác, Microservices cho phép scale riêng phần đó để tiết kiệm chi phí.
+*   **Tần suất Release:** Nếu các bộ phận cần release độc lập mà không muốn chờ đợi nhau, Microservices là lựa chọn phù hợp.
+
+### 3. Rủi ro khi chọn Microservices quá sớm (Premature Decomposition)
+"Cái giá" của Microservices không hề rẻ:
+
+*   **Overhead về vận hành:** Phải quản lý mạng lưới (network), bảo mật giữa các service và việc triển khai phức tạp hơn gấp nhiều lần.
+*   **Dữ liệu phân tán:** Rất khó để đảm bảo tính nhất quán (Data Consistency) và thực hiện các truy vấn báo cáo liên quan đến nhiều service.
+*   **Độ trễ (Latency):** Việc gọi API qua mạng luôn chậm hơn việc gọi hàm trong cùng một bộ nhớ.
+*   **Khó Debug:** Việc tìm ra lỗi nằm ở service nào trong một chuỗi call-stack dài là một thử thách lớn nếu thiếu hệ thống log tập trung.
+
+### 4. Khi nào Monolith lại là lựa chọn tốt hơn?
+Đừng coi Monolith là "lỗi thời", nó vẫn là lựa chọn tối ưu khi:
+
+*   **Giai đoạn Start-up/MVP:** Cần tập trung 100% vào tính năng để kiểm chứng thị trường thay vì tốn thời gian xây dựng hạ tầng.
+*   **Đội ngũ tinh gọn:** Khi mọi người có thể nắm bắt toàn bộ code base và phối hợp trực tiếp.
+*   **Nghiệp vụ chưa định hình:** Trong giai đoạn đầu, ranh giới giữa các module thường thay đổi liên tục. Việc chia service sai từ đầu sẽ dẫn đến **"Distributed Monolith"** – mang tất cả nhược điểm của cả hai kiến trúc.
+
+---
+**Nguyên tắc cốt lõi:** Hãy bắt đầu với một **Modular Monolith** (thiết kế Monolith nhưng chia module rõ ràng). Khi nào một module thực sự trở nên quá tải hoặc cần tách biệt hoàn toàn về đội ngũ/tài nguyên, lúc đó mới chuyển nó thành một Microservice.
+
+
+---
+
+
+# Thiết kế Observability: Chiến lược “Debug trong 5 phút” trên Production
+
+>Câu hỏi này mang tính thực chiến cao, thường dành cho những người đã trực tiếp đối mặt với các sự cố nghiêm trọng (incident) và hiểu rõ giá trị của việc "nhìn thấy" những gì đang thực sự diễn ra bên trong hệ thống.
+>*   **Những thông tin tiên quyết để debug nhanh**
+>*   **Logging: Điểm cân bằng giữa sự chi tiết và hiệu năng**
+>*   **Vai trò phối hợp giữa Metrics và Tracing**
+>*   **Trải nghiệm thực tế: Cái giá phải trả khi thiếu Observability khiến sự cố kéo dài**
+
+## Thiết kế Observability: Chiến lược “Debug trong 5 phút” trên Production
+
+Để có thể "debug trong 5 phút" giữa một cuộc khủng hoảng trên Production, hệ thống không chỉ cần có Log, mà cần một hệ sinh thái Observability (Quan sát) được thiết kế có ý đồ. Dựa trên kinh nghiệm xử lý các sự cố tại **Tổng cục Hải quan** và **2B System Corporation**, tôi tiếp cận vấn đề này qua 3 trụ cột chính: **Metrics, Tracing và Logging**.
+
+---
+
+### 1. Những thông tin cần thiết để "bắt bệnh" nhanh
+Khi có sự cố, tôi cần trả lời nhanh 3 câu hỏi theo thứ tự:
+*   **Chuyện gì đang xảy ra? (Metrics):** Hệ thống sập hoàn toàn hay chỉ chậm? Lỗi xảy ra ở tất cả người dùng hay chỉ một nhóm?
+*   **Lỗi nằm ở đâu? (Tracing):** Lỗi tại Service của mình, tại Database, hay tại một API bên thứ ba?
+*   **Tại sao nó lỗi? (Logging):** Nguyên nhân chi tiết (Exception, giá trị biến tại thời điểm đó) là gì?
+
+### 2. Chiến lược Logging: Chất lượng hơn số lượng
+Để debug nhanh, log không được quá ít (thiếu thông tin) nhưng cũng không được quá nhiều (gây nhiễu).
+*   **Structured Logging:** Luôn sử dụng định dạng JSON để các công cụ như ELK hoặc Splunk có thể truy vấn nhanh theo field (ví dụ: `level: ERROR AND customerId: 123`).
+*   **Correlation ID:** Đây là yếu tố sống còn. Mỗi request phải được gán một **TraceID** duy nhất, xuất hiện xuyên suốt trong mọi dòng log của mọi service mà request đó đi qua.
+*   **Contextual Log:** Log cần ghi lại "trạng thái" thay vì chỉ ghi lại "hành động". 
+    *   *Kém:* "Error saving user"
+    *   *Tốt:* "Error saving user ID 456, reason: Database timeout"
+
+### 3. Vai trò của Metrics và Tracing
+*   **Metrics (Cảnh báo sớm):** Theo dõi các chỉ số **GOLDEN SIGNALS** trên Grafana: Latency (Độ trễ), Traffic (Lưu lượng), Errors (Tỷ lệ lỗi), và Saturation (Độ bão hòa tài nguyên). Giúp khoanh vùng sự cố trong chưa đầy 1 phút.
+*   **Tracing (Bản đồ thực thi):** Sử dụng Jaeger hoặc Zipkin để thấy biểu đồ hình thác của một request. Nếu một API mất 10 giây, Tracing sẽ chỉ rõ phần lớn thời gian nằm ở câu truy vấn SQL cụ thể nào, loại bỏ hoàn toàn việc đoán mò.
+
+### 4. Trải nghiệm khi thiếu Observability
+Tôi từng chứng kiến một sự cố kéo dài hơn **4 tiếng** chỉ vì thiếu TraceID:
+*   **Tình huống:** Khách hàng báo lỗi không thể thanh toán. Log Service Thanh toán báo "Invalid Signature", nhưng Log Service Identity lại báo "Success". 
+*   **Khó khăn:** Vì không có ID liên kết, team Backend phải so khớp thủ công timestamp giữa hàng triệu dòng log để tìm xem chúng thuộc về cùng một request nào.
+*   **Hậu quả:** Sự cố kéo dài vô ích chỉ để "tìm xem log này là của ai".
+
+### 5. Nguyên tắc "Debug 5 phút"
+*   **Tự động hóa cảnh báo:** Bắn alert về Slack/Telegram ngay khi tỷ lệ lỗi vượt quá 1% trong 1 phút.
+*   **One-Click Dashboard:** Một link duy nhất dẫn tới dashboard chứa tất cả các chỉ số quan trọng của module.
+*   **Error Link:** Trong thông báo lỗi gửi về Slack, đính kèm luôn link đến bộ lọc log của TraceID đó trên Kibana. 
+
+---
+**Kết luận:** Observability không phải là cài đặt công cụ, mà là văn hóa thiết kế code sao cho khi nó "chết", nó phải tự để lại manh mối rõ ràng nhất.
+
+
+---
+
+
+# Thiết kế Database và Transaction Boundary: Tránh Distributed Transaction
+
+>Câu hỏi này tập trung vào khả năng thiết kế hệ thống của bạn ngay từ giai đoạn đầu để giảm thiểu sự phụ thuộc vào các giao dịch phân tán phức tạp và khó kiểm soát.
+>*   **Vì sao Distributed Transaction dễ gây rắc rối**
+>*   **Cách bạn chia Boundary giữa các service (Tư duy thiết kế)**
+>*   **Trải nghiệm thực tế: Khi transaction kéo dài gây lỗi hệ thống**
+>*   **Trade-off: Sự đánh đổi giữa tính nhất quán (Consistency) và độ phức tạp**
+
+## Thiết kế Database và Transaction Boundary: Tránh Distributed Transaction
+
+Thiết kế Database và Transaction Boundary (Ranh giới giao dịch) là bước quan trọng nhất để tránh việc phải sử dụng Distributed Transaction (Giao dịch phân tán) – một trong những "cơn ác mộng" lớn nhất về mặt vận hành và hiệu năng. Trong các dự án tôi từng tham gia, phương châm của tôi là: **"Cách tốt nhất để xử lý Distributed Transaction là không để nó xảy ra"**.
+
+---
+
+### 1. Vì sao Distributed Transaction dễ gây rắc rối?
+Tôi luôn tránh 2-Phase Commit (2PC) hoặc các cơ chế tương tự vì:
+
+*   **Độ trễ cao (High Latency):** Hệ thống phải chờ đợi xác nhận từ tất cả các nút. Chỉ cần một service phản hồi chậm, toàn bộ luồng sẽ bị tắc nghẽn.
+*   **Nguy cơ "chết chùm" (Cascading Failure):** Nếu một service gặp sự cố giữa chừng, tài nguyên tại các service khác có thể bị khóa (lock) vô thời hạn, dẫn đến cạn kiệt Connection Pool.
+*   **Độ phức tạp cực cao:** Việc duy trì tính nhất quán dữ liệu (ACID) trên nhiều database khác nhau là rất khó khăn và tốn kém về mặt tài nguyên.
+
+### 2. Cách chia Boundary để tránh vấn đề
+Tôi áp dụng tư duy **Domain-Driven Design (DDD)** để xác định ranh giới:
+
+*   **Nguyên tắc "Một thực thể, một Database":** Mọi nghiệp vụ bắt buộc phải đảm bảo tính nhất quán tức thời (Strong Consistency) thì phải được gom vào cùng một Bounded Context và dùng chung một Database Schema.
+*   **Aggregate Root:** Xác định các đối tượng chính (ví dụ: `DonHang`). Mọi thay đổi liên quan đến đơn hàng (chi tiết đơn hàng, trạng thái thanh toán) sẽ nằm trong cùng một Transaction Boundary của Service Đơn hàng.
+*   **Chuyển sang Eventual Consistency:** Với những nghiệp vụ không cần nhanh tức thì (ví dụ: thanh toán xong mới trừ kho, hoặc cộng điểm thành viên), tôi tách chúng ra khỏi Transaction chính và sử dụng Message Broker (Kafka/RabbitMQ) để thông báo cho các service khác xử lý sau.
+
+### 3. Trải nghiệm thực tế khi Transaction kéo dài
+Tại **2B System Corporation**, tôi từng xử lý một bug "kinh điển":
+
+*   **Sự cố:** Trong một Transaction, lập trình viên thực hiện: (1) Lưu DB -> (2) Gọi API gửi Email -> (3) Lưu tiếp DB.
+*   **Hậu quả:** Khi server Email phản hồi chậm (mất 30 giây), kết nối Database của bước (1) bị giữ quá lâu. Khi traffic tăng, toàn bộ Connection Pool bị chiếm dụng hết, khiến API sập hoàn toàn dù Database vẫn rảnh.
+*   **Bài học:** Không bao giờ gọi I/O bên ngoài (API, Email, File) bên trong một Database Transaction. Tôi đã tách việc gửi Email thành một tác vụ nền (Background Job) để Transaction DB kết thúc trong vài mil giây.
+
+### 4. Trade-off: Nhất quán hay Đơn giản?
+Tôi luôn cân nhắc dựa trên định lý **CAP**:
+
+*   **Ưu tiên Đơn giản & Sẵn sàng (Availability):** Trong 90% trường hợp, người dùng có thể chấp nhận việc "đang xử lý" hoặc dữ liệu cập nhật chậm vài giây (**Eventual Consistency**). Tôi chọn cách này để đổi lấy hệ thống chạy nhanh và dễ scale.
+*   **Chấp nhận Phức tạp khi cần thiết:** Chỉ với các nghiệp vụ cực kỳ nhạy cảm (như tài chính, ngân hàng), tôi mới sử dụng các pattern như **Saga (Orchestration/Choreography)**. Tuy nhiên, Saga yêu cầu phải viết thêm logic **Compensating Transaction** (Giao dịch bù trừ - ví dụ: nếu trừ kho lỗi thì phải hoàn tiền) để đảm bảo dữ liệu cuối cùng vẫn đúng.
+
+---
+**Nguyên tắc rút ra:** Nếu bạn thấy mình đang cần một Distributed Transaction, hãy quay lại kiểm tra xem cách chia Service/Database của bạn đã thực sự đúng chưa. Đôi khi, việc gộp 2 service nhỏ lại thành 1 service lớn hơn là một quyết định thông minh hơn nhiều so với việc cố gắng triển khai Saga hay 2PC.
+
+
+---
+
+
+# Xử lý Consistency vs Availability trong Hệ thống Phân tán
+
+>Câu hỏi này không yêu cầu bạn nhắc lại định lý CAP một cách lý thuyết, mà để xem xét khả năng ra quyết định: Bạn chấp nhận hy sinh điều gì trong bối cảnh thực tế?
+>*   **Loại dữ liệu nào cần Consistency cao (Tính nhất quán)**
+>*   **Khi nào Availability (Tính sẵn sàng) quan trọng hơn**
+>*   **Trải nghiệm hệ thống khi phải chấp nhận Degrade (Giảm cấp) tạm thời**
+>*   **Cách bạn truyền đạt và thống nhất quyết định này trong nội bộ team**
+
+## Xử lý Consistency vs Availability trong Hệ thống Phân tán
+
+Trong các hệ thống phân tán tại **E-Office** hay **Tổng cục Hải quan**, việc lựa chọn giữa **Consistency (Tính nhất quán)** và **Availability (Tính sẵn sàng)** không bao giờ là một quyết định lý thuyết suông. Đó là sự đánh đổi dựa trên giá trị kinh doanh và kỳ vọng của người dùng.
+
+---
+
+### 1. Loại dữ liệu cần Consistency cao (Ưu tiên C)
+Tôi luôn ưu tiên tính nhất quán tuyệt đối cho các dữ liệu mang tính "sống còn" hoặc có hệ quả pháp lý:
+
+*   **Dữ liệu Tài chính/Số dư:** Trong các module liên quan đến phí, lệ phí hoặc thanh toán, sai lệch dữ liệu là không thể chấp nhận. Nếu hệ thống không thể đảm bảo ghi đúng, tôi thà trả về lỗi (hy sinh Availability) còn hơn ghi sai.
+*   **Trạng thái quy trình (Workflow State):** Một văn bản không thể vừa ở trạng thái "Đã duyệt" lại vừa ở trạng thái "Đang chờ" trên hai server khác nhau.
+*   **Cấu hình hệ thống (Global Config):** Các tham số bảo mật hoặc phân quyền cần được đồng bộ tức thì để tránh lỗ hổng.
+
+### 2. Khi nào Availability quan trọng hơn (Ưu tiên A)
+Tôi sẵn sàng chấp nhận **Eventual Consistency** (Nhất quán sau) cho các trải nghiệm mang tính chất thông tin:
+
+*   **Thông báo (Notifications):** Việc nhận thông báo chậm vài giây không nghiêm trọng bằng việc toàn bộ hệ thống bị treo chỉ để chờ xác nhận gửi tin nhắn thành công.
+*   **Dữ liệu tìm kiếm/Thống kê:** Khi tìm kiếm hồ sơ, nếu kết quả vừa cập nhật cách đó 1 giây chưa xuất hiện ngay thì vẫn có thể chấp nhận được để đổi lấy tốc độ phản hồi cực nhanh.
+*   **Log/Audit Trail:** Việc ghi lại lịch sử hoạt động có thể được xử lý bất đồng bộ qua Message Queue để đảm bảo luồng nghiệp vụ chính luôn sẵn sàng.
+
+
+
+### 3. Trải nghiệm hệ thống khi phải Degrade (Giảm cấp) tạm thời
+Tại **2B System Corporation**, tôi từng áp dụng chiến thuật **Graceful Degradation** khi Database chính quá tải:
+
+*   **Giải pháp:** Hệ thống tạm thời khóa chức năng "Cập nhật thông tin" (Hy sinh tính nhất quán ghi) nhưng vẫn cho phép người dùng "Xem thông tin" từ các bản Cache hoặc Read-Replica.
+*   **Kết quả:** Người dùng vẫn có thể thực hiện được 80% công năng thay vì đối mặt với trang báo lỗi 500.
+
+### 4. Cách truyền đạt quyết định cho Team và Stakeholders
+Tôi chuyển dịch các thuật ngữ kỹ thuật sang ngôn ngữ nghiệp vụ để đạt được sự đồng thuận:
+
+*   **Định nghĩa bằng ngôn ngữ nghiệp vụ:** Thay vì nói "chọn AP", tôi nói: *"Trong trường hợp mạng chậm, chúng ta cho phép người dùng thao tác tiếp và hệ thống sẽ tự động đồng bộ lại sau thay vì chặn đứng họ"*.
+*   **Phân tích rủi ro cụ thể:** *"Nếu chọn nhất quán tuyệt đối, hệ thống có thể treo 5-10 giây mỗi khi mạng lag. Khách hàng có chấp nhận chờ không?"*.
+*   **Thiết kế cơ chế bù trừ (Compensation):** Nếu chọn Eventual Consistency, tôi luôn đề xuất thêm logic xử lý xung đột dữ liệu (ví dụ: gửi cảnh báo cho Admin xử lý thủ công nếu có sai sót sau đồng bộ).
+
+---
+**Nguyên tắc rút ra:** Không có hệ thống nào hoàn hảo 100%. Nhiệm vụ của người kiến trúc sư là hiểu rõ ngưỡng chịu đựng của nghiệp vụ để chọn điểm cân bằng phù hợp nhất.
+
+
+---
+
+
+# Quản trị rủi ro khi Rollout tính năng (Canary, Feature Flag, Rollback)
+
+>Câu hỏi này kiểm tra khả năng đưa những thay đổi vào môi trường Production một cách an toàn và chuyên nghiệp, đảm bảo tính ổn định của hệ thống ngay cả khi có sự cố xảy ra.
+>*   **Rủi ro lớn nhất khi rollout là gì?**
+>*   **Chiến lược giảm Blast Radius (Phạm vi ảnh hưởng)**
+>*   **Trải nghiệm thực tế về việc Rollback trong tình huống khẩn cấp**
+>*   **Những thói quen giúp đội ngũ Deploy tự tin hơn mỗi ngày**
+
+## Quản trị rủi ro khi Rollout tính năng (Canary, Feature Flag, Rollback)
+
+Quản trị rủi ro khi rollout không chỉ là việc nhấn nút "Deploy" mà là một nghệ thuật kiểm soát sự không chắc chắn. Dựa trên kinh nghiệm từ các dự án như **E-Office** và các hệ thống tại **Tổng cục Hải quan**, tôi tiếp cận việc rollout theo nguyên tắc: **"Mọi thay đổi đều tiềm ẩn lỗi, điều quan trọng là lỗi đó ảnh hưởng đến bao nhiêu người"**.
+
+---
+
+### 1. Rủi ro lớn nhất khi Rollout
+Đối với tôi, rủi ro lớn nhất không phải là code có lỗi (vì lỗi có thể fix), mà là **"Silent Failure"** (Lỗi âm thầm) và **"Data Corruption"** (Hỏng dữ liệu):
+
+*   **Silent Failure:** Hệ thống không sập ngay nhưng logic bị sai (ví dụ: tính sai phí nhưng API vẫn trả về 200). Nếu không phát hiện sớm, dữ liệu sai sẽ lan rộng.
+*   **Data Corruption:** Code mới làm hỏng cấu trúc dữ liệu trong DB. Việc rollback code thì dễ, nhưng "dọn dẹp" đống dữ liệu bị hỏng trong DB là một cực hình.
+
+### 2. Cách giảm Blast Radius (Bán kính ảnh hưởng)
+Tôi sử dụng chiến thuật "phòng thủ nhiều lớp" để đảm bảo nếu có lỗi, số người bị ảnh hưởng là nhỏ nhất:
+
+*   **Feature Flags (Tắt/Mở tính năng):** Sử dụng thư viện (như Unleash) hoặc cấu hình trong DB/Redis. Tính năng mới được deploy nhưng ở trạng thái **OFF**. Tôi có thể bật nó cho riêng tài khoản nội bộ để test ngay trên Production mà không ảnh hưởng đến khách hàng.
+*   **Canary Deployment:** Thay vì đẩy code cho 100% server, tôi chỉ đẩy lên 1-2 instance (khoảng 5-10% lưu lượng). Theo dõi log và metrics của cụm Canary này trong 15-30 phút; nếu ổn định mới tiếp tục rollout dần dần.
+
+### 3. Trải nghiệm Rollback trong tình huống khẩn cấp
+Tại **2B System Corporation**, tôi từng trải qua một pha xử lý "thót tim":
+
+*   **Sự cố:** Sau khi rollout 100%, hệ thống báo lỗi không tương thích phiên bản cache giữa code mới và code cũ.
+*   **Hành động:** Thay vì cố gắng tìm file để sửa (hotfix), tôi thực hiện **Rollback ngay lập tức** về phiên bản ổn định gần nhất thông qua CI/CD (mất chưa đầy 2 phút).
+*   **Nguyên tắc:** Khi có sự cố ảnh hưởng đến UX, ưu tiên số một là đưa hệ thống về trạng thái chạy được, sau đó mới ngồi phân tích nguyên nhân (Post-mortem).
+
+### 4. Những thói quen giúp Deploy tự tin hơn
+Để không còn cảm giác "run tay" mỗi khi deploy, tôi duy trì 3 thói quen:
+
+*   **Nghiêm cấm "Friday Deploy":** Không bao giờ deploy tính năng lớn vào chiều thứ Sáu hoặc trước kỳ nghỉ lễ, trừ trường hợp khẩn cấp.
+*   **Tự động hóa Smoke Test:** Ngay sau khi deploy, script tự động sẽ chạy để kiểm tra các luồng chính (Login, xem hồ sơ, lưu dữ liệu). Nếu Smoke Test fail, CI/CD tự động trigger rollback.
+*   **Bình thường hóa việc Rollback:** Rollback không phải là thất bại. Nó là một công cụ quản trị rủi ro chuyên nghiệp.
+
+---
+**Kết luận:** Rollout an toàn là khi bạn luôn có một **"lối thoát" (Exit strategy)** được chuẩn bị sẵn. Một kỹ sư giỏi không phải là người không bao giờ làm sai, mà là người biết cách khống chế hậu quả của cái sai đó trong phạm vi hẹp nhất.
+
+
+---
+
+
+# Quyết định Framework/Library/Architecture: Thuyết phục Team bằng gì?
+
+>Câu hỏi này đặc biệt quan trọng đối với vai trò Lead hoặc Architect, bởi nó không chỉ dừng lại ở vấn đề kỹ thuật mà còn liên quan mật thiết đến yếu tố con người và sự vận hành bền vững của đội ngũ.
+>*   **Tiêu chí đánh giá lựa chọn (The Criteria)**
+>*   **Cách trình bày Trade-off (Sự đánh đổi) cho Team**
+>*   **Trải nghiệm thực tế: Khi áp đặt quyết định gây phản tác dụng**
+>*   **Bài học về sự đồng thuận kỹ thuật (Technical Consensus)**
+
+# Quyết định Framework/Library/Architecture: Thuyết phục Team bằng gì?
+
+Việc thuyết phục team chấp nhận một framework hay kiến trúc mới không nên là một cuộc "áp đặt mệnh lệnh", mà là một quá trình chứng minh giá trị dựa trên dữ liệu và sự thấu hiểu. Trong vai trò dẫn dắt kỹ thuật tại các dự án như **E-Office** hay các hệ thống nghiệp vụ tại **Tổng cục Hải quan**, tôi luôn áp dụng công thức: **Dữ liệu thực tế + Phân tích đánh đổi + Sự đồng thuận**.
+
+---
+
+### 1. Tiêu chí khi đánh giá lựa chọn
+Trước khi đưa ra thảo luận, tôi tự mình kiểm chứng qua 4 bộ lọc:
+
+*   **Hệ sinh thái & Cộng đồng:** Thư viện này có phổ biến không? Bao lâu thì có bản vá lỗi? Liệu có dễ dàng tìm tài liệu hỗ trợ khi gặp khó khăn không?
+*   **Độ dốc đường cong học tập (Learning Curve):** Team mất bao lâu để làm chủ nó? Một framework hay nhưng mất 3 tháng để học trong khi deadline là 4 tháng thì đó là một lựa chọn tồi.
+*   **Khả năng bảo trì (Maintainability):** Nó giúp code sạch hơn hay khiến hệ thống trở nên phức tạp và khó debug hơn?
+*   **Sự phù hợp (Fit for purpose):** Nó có giải quyết đúng nỗi đau hiện tại không? Đừng dùng "búa tạ" (như Microservices) để "giết kiến" (một ứng dụng CRUD đơn giản).
+
+### 2. Cách trình bày Trade-off cho team
+Tôi không bao giờ nói một công nghệ là "hoàn hảo". Tôi trình bày theo bảng so sánh **"Cái được và Cái giá"**:
+
+| Tiêu chí | Lựa chọn A (Hiện tại) | Lựa chọn B (Đề xuất) |
+| :--- | :--- | :--- |
+| **Ưu điểm** | Team đã quen tay, ổn định. | Hiệu năng tăng 2x, hỗ trợ tốt cho async. |
+| **Nhược điểm** | Khó mở rộng, tốn tài nguyên. | Mất thời gian học, cú pháp mới lạ. |
+| **Rủi ro** | Technical debt tích tụ. | Khó tìm nhân sự thay thế nếu quá đặc thù. |
+
+> **Cách thuyết phục:** Tôi thường tổ chức một buổi **PoC (Proof of Concept)** nhỏ. Thay vì nói lý thuyết, tôi code thử một module thực tế bằng cả hai cách để team nhìn thấy sự khác biệt trực quan.
+
+### 3. Trải nghiệm khi "áp đặt" gây phản tác dụng
+Tôi từng mắc sai lầm tại **2B System Corporation**:
+
+*   **Tình huống:** Tôi quyết định ép team chuyển sang dùng một library quản lý state rất phức tạp vì tôi thấy nó "xịn".
+*   **Hậu quả:** Team không hiểu bản chất, dẫn đến dùng sai cách. Code sinh ra nhiều bug hơn, tinh thần anh em đi xuống vì cảm thấy bị ép buộc.
+*   **Bài học:** Quyết định kỹ thuật đúng mà không có sự đồng thuận của người thực thi thì vẫn là một quyết định thất bại.
+
+### 4. Bài học về sự đồng thuận kỹ thuật (Technical Consensus)
+*   **Lắng nghe phản biện:** Khuyến khích những người phản đối mạnh mẽ nhất đưa ra lý lẽ. Đôi khi họ nhìn thấy rủi ro mà mình đã bỏ qua.
+*   **Quyền sở hữu (Ownership):** Khi team tham gia vào quá trình lựa chọn, họ sẽ có trách nhiệm hơn. Nếu có khó khăn, họ sẽ cùng tìm cách giải quyết thay vì chỉ trích.
+*   **Thử nghiệm nhỏ trước khi làm lớn:** Thử nghiệm trên một module không trọng yếu. Nếu thành công, kết quả thực tế sẽ tự thuyết phục mọi người.
+
+---
+**Kết luận:** Một Architect giỏi không phải là người đưa ra quyết định thông minh nhất, mà là người khiến cả team tin tưởng và cùng nhau thực thi quyết định đó một cách tốt nhất.
+
+
+---
+
+
+# Xử lý Tech Debt: Chiến lược Quản lý thay vì “Đập đi làm lại”
+
+>Nợ kỹ thuật (Tech debt) là một phần tất yếu trong quá trình phát triển phần mềm. Điều quan trọng không phải là triệt tiêu nó hoàn toàn, mà là cách bạn quản lý và kiểm soát để nó không trở thành rào cản cho sự phát triển của hệ thống.
+>*   **Dấu hiệu nhận biết Tech Debt bắt đầu gây hại cho hệ thống**
+>*   **Cách ưu tiên xử lý từng phần (Prioritization)**
+>*   **Trải nghiệm Refactor song song với việc phát triển tính năng mới (Feature)**
+>*   **Chiến thuật thuyết phục Stakeholder dành nguồn lực cho Tech Debt**
+
+## Xử lý Tech Debt: Chiến lược Quản lý thay vì “Đập đi làm lại”
+
+Xử lý nợ kỹ thuật (Tech Debt) là một phần tất yếu trong vòng đời sản phẩm, nhất là với các hệ thống có thâm niên như **E-Office** hay các hệ thống nghiệp vụ lớn. Quan điểm của tôi là không bao giờ "đập đi làm lại" một cách cực đoan, vì đó là rủi ro rất lớn về cả kinh doanh lẫn vận hành. Thay vào đó, tôi áp dụng chiến lược **"Cải tiến liên tục" (Incremental Refactoring)**.
+
+---
+
+### 1. Dấu hiệu Tech Debt bắt đầu gây hại
+Tôi nhận diện Tech Debt đã đến ngưỡng báo động khi xuất hiện các triệu chứng:
+
+*   **Vận tốc phát triển (Velocity) giảm mạnh:** Một tính năng đơn giản trước đây mất 2 ngày, giờ mất 2 tuần vì code quá rối rắm, chạm vào đâu cũng hỏng.
+*   **Bug "tái hồi":** Sửa lỗi này lại mọc ra lỗi kia ở một module hoàn toàn khác do code quá gắn kết (**Tight Coupling**).
+*   **Nỗi sợ deploy:** Team cảm thấy lo lắng mỗi khi phải đẩy code lên Production vì không ai thực sự hiểu hết các tác dụng phụ của đoạn code cũ.
+
+### 2. Cách ưu tiên xử lý từng phần
+Tôi không refactor dàn trải mà tập trung vào những khu vực mang lại giá trị cao nhất dựa trên ma trận rủi ro:
+
+1.  **High Interest, High Friction:** Những module chứa logic lõi, thường xuyên phải thay đổi nhưng code lại cực kỳ khó đọc và dễ lỗi. Đây là **ưu tiên số 1**.
+2.  **Điểm nghẽn hiệu năng:** Những đoạn code gây tốn tài nguyên hoặc làm chậm hệ thống thực tế (ví dụ: truy vấn DB không tối ưu).
+3.  **Thư viện lỗi thời:** Các dependency đã hết hạn hỗ trợ (EOL) hoặc có lỗ hổng bảo mật nghiêm trọng.
+
+### 3. Trải nghiệm Refactor song song với Feature
+Tôi áp dụng quy tắc **"Boy Scout Rule"** (Luôn để lại khu trại sạch hơn lúc bạn đến):
+
+*   **Refactor trong phạm vi Task:** Khi làm tính năng mới tại một module cũ, tôi dành thêm 10-20% thời gian để dọn dẹp, viết thêm Unit Test hoặc tách hàm cho module đó.
+*   **Chiến lược "Bọc" (Strangler Fig Pattern):** Với những đoạn code quá phức tạp, thay vì sửa trực tiếp, tôi viết một hàm/class mới với logic chuẩn, sau đó chuyển dần các luồng gọi từ cũ sang mới cho đến khi code cũ không còn ai dùng thì xóa bỏ.
+*   **Unit Test làm lá chắn:** Trước khi chạm vào code cũ, tôi luôn viết Test bao phủ các trường hợp hiện tại để đảm bảo việc refactor không làm thay đổi hành vi (**Behavior**) của hệ thống.
+
+### 4. Cách thuyết phục Stakeholder
+Tôi thuyết phục Product Owner hoặc quản lý bằng **"ngôn ngữ kinh doanh"**:
+
+*   **Dùng dữ liệu:** Thay vì nói "code xấu", tôi nói: *"Nếu không xử lý đoạn này, thời gian phát triển các tính năng tiếp theo sẽ tăng thêm 30%"*.
+*   **Gắn nợ kỹ thuật vào Roadmap:** Đề xuất dành riêng khoảng **15-20% quỹ thời gian** mỗi Sprint cho việc bảo trì. Đây là khoản "trả lãi" để tránh việc hệ thống bị "phá sản kỹ thuật" trong tương lai.
+*   **Chứng minh qua sự cố:** Khi có sự cố (incident) xảy ra do Tech Debt, tôi thực hiện **Post-mortem** chi tiết để Stakeholder thấy rõ cái giá phải trả bằng tiền mặt và uy tín.
+
+---
+**Nguyên tắc rút ra:** Xử lý Tech Debt giống như việc dọn dẹp nhà cửa mỗi ngày. Nếu làm đều đặn, hệ thống luôn khỏe mạnh; nếu đợi đến lúc quá tệ mới bắt đầu, chi phí sẽ trở nên khổng lồ.
+
+Bạn thường quản lý danh sách Tech Debt của mình ở đâu (như Jira Backlog, SonarQube hay một tài liệu kỹ thuật riêng)?
+
+
+---
+
+
+# Đánh giá và Cải thiện Team Productivity: Coding Guideline, Review & CI/CD
+
+>Câu hỏi này phản ánh tư duy xây dựng đội ngũ và hệ thống vận hành chuyên nghiệp, thay vì chỉ tập trung vào việc trở thành một cá nhân làm việc giỏi độc lập.
+>*   **Dấu hiệu nhận biết Team đang chậm lại hoặc dễ xảy ra lỗi**
+>*   **Vai trò của Coding Guideline và Code Review trong việc duy trì chất lượng**
+>*   **Trải nghiệm thực tế: Khi cải thiện Workflow mang lại hiệu quả đột phá**
+>*   **Cách bạn đo lường sự cải thiện (Metrics & Feedback)**
+
+## Đánh giá và Cải thiện Team Productivity: Coding Guideline, Review & CI/CD
+
+Cải thiện năng suất đội ngũ (Team Productivity) không phải là ép anh em làm thêm giờ, mà là loại bỏ những "ma sát" trong quy trình để code có thể chảy từ máy lập trình viên lên Production một cách trơn tru nhất. Dựa trên kinh nghiệm dẫn dắt tại **2B System Corporation** và các dự án như **E-Office**, tôi tiếp cận bài toán này qua 3 trụ cột: **Tiêu chuẩn, Quy trình và Công cụ**.
+
+---
+
+### 1. Dấu hiệu Team đang "chậm" hoặc "dễ lỗi"
+Tôi thường quan sát các chỉ số "đỏ" sau để nhận diện vấn đề của team:
+
+*   **Cycle Time kéo dài:** Một tính năng mất quá nhiều thời gian từ lúc bắt đầu code đến khi deploy thành công.
+*   **Review Deadlock:** Các Pull Request (PR) bị treo hàng tuần trời vì không ai review hoặc tranh cãi không hồi kết về coding style.
+*   **Lỗi lặp lại:** Những lỗi cơ bản (như Null Pointer, thiếu validate) liên tục xuất hiện dù đã được nhắc nhở.
+*   **"Nỗi sợ" Deploy:** Team không dám deploy vào cuối ngày vì quy trình thủ công quá phức tạp và dễ sai sót.
+
+### 2. Vai trò của Guideline và Code Review
+Đây là hai "chốt chặn" quan trọng nhất để giữ cho code base không trở thành một bãi rác:
+
+*   **Coding Guideline (Tiêu chuẩn):** Tôi không muốn team tranh cãi việc đặt dấu ngoặc ở đâu. Tôi sử dụng các bộ standard (như Google Style) và ép thực hiện tự động bằng **Checkstyle/SonarQube**. Mục tiêu là để code của 10 người trông như được viết bởi 1 người.
+*   **Code Review (Chia sẻ tri thức):** Review không chỉ là bắt lỗi, mà là để mọi người hiểu code của nhau. Tôi khuyến khích quy tắc: *"Review trong vòng 24h"*. Nếu PR quá lớn, tôi yêu cầu chia nhỏ để review hiệu quả hơn.
+
+### 3. Cải thiện Workflow: Trải nghiệm thực tế
+Tại dự án **Quản lý Cán bộ**, tôi từng thay đổi workflow mang lại hiệu quả rõ rệt:
+
+*   **Trước đó:** Team deploy thủ công bằng cách build file rồi copy lên server qua FTP. Mỗi lần deploy mất 30 phút và rất dễ cấu hình sai.
+*   **Cải thiện:** Thiết lập đường ống **CI/CD** hoàn chỉnh (Jenkins/GitLab CI):
+    *   **CI:** Tự động chạy Unit Test và SonarQube ngay khi push code. Nếu không pass, không cho Merge.
+    *   **CD:** Deploy tự động lên môi trường Staging/UAT chỉ bằng một click.
+*   **Kết quả:** Thời gian deploy giảm từ 30 phút xuống còn 3 phút. Tâm lý anh em thoải mái hơn vì hệ thống tự động bắt các lỗi ngớ ngẩn.
+
+### 4. Cách đo lường sự cải thiện
+Tôi dựa trên các chỉ số **DORA metrics** thay vì đếm dòng code:
+
+*   **Deployment Frequency:** Tần suất deploy. Team mạnh là team có thể deploy nhiều lần trong ngày.
+*   **Lead Time for Changes:** Thời gian từ lúc commit đến khi code chạy trên Prod.
+*   **Change Failure Rate:** Tỷ lệ deploy gây ra lỗi. Chỉ số này giảm chứng tỏ chất lượng code và khâu review tốt.
+*   **Mean Time to Recovery (MTTR):** Thời gian trung bình để khôi phục khi có sự cố.
+
+### 5. Xây dựng văn hóa "Cùng sở hữu" (Shared Ownership)
+*   **Trách nhiệm chung:** Nếu một bạn Junior làm lỗi, đó là trách nhiệm của cả người Review đã bỏ sót.
+*   **Tối ưu Onboarding:** Khuyến khích viết tài liệu (Wiki/ReadMe) để người mới có thể bắt nhịp trong vòng 2-3 ngày thay vì 2 tuần.
+
+---
+**Kết luận:** Năng suất đội ngũ là kết quả của một môi trường mà ở đó lập trình viên cảm thấy an toàn để sáng tạo, có công cụ tốt hỗ trợ và quy trình rõ ràng để không phải đoán mò.
+
+Theo bạn, trong 3 yếu tố: Guideline, Review và CI/CD, yếu tố nào hiện đang là "nút thắt cổ chai" lớn nhất trong team của bạn?
+
+
+---
+
+# Mentor Junior: Chiến lược tăng tốc và phát triển con người
+
+>Câu hỏi này phản ánh triết lý phát triển đội ngũ của bạn: Bạn ưu tiên điều gì để một lập trình viên Junior có thể hòa nhập và đóng góp giá trị nhanh nhất cho dự án?
+>*   **Điều Junior thường thiếu nhất (The Gaps)**
+>*   **Cách bạn giúp họ tránh lặp lại sai lầm (Feedback Loop)**
+>*   **Trải nghiệm Mentoring thực tế mang lại kết quả đột phá**
+>*   **Quan điểm về việc học bền vững trong ngành công nghệ**
+
+## Mentor Junior: Chiến lược tăng tốc và phát triển con người
+
+Khi mentor một Junior, triết lý của tôi không phải là biến họ thành một "từ điển sống" về cú pháp ngôn ngữ, mà là giúp họ xây dựng tư duy giải quyết vấn đề và tác phong làm việc chuyên nghiệp. Dựa trên kinh nghiệm từ các dự án thực tế, tôi ưu tiên dạy họ 4 trụ cột sau để tăng tốc nhanh nhất:
+
+---
+
+### 1. Điều Junior thường thiếu nhất: "Bức tranh toàn cảnh"
+Đa số các bạn mới thường rơi vào cái bẫy "tunnel vision" – chỉ tập trung vào viết code sao cho chạy được task được giao mà quên mất:
+
+*   **Context (Bối cảnh):** Tại sao tính năng này lại cần thiết cho người dùng? Nó tác động thế nào đến các module khác?
+*   **Hệ quả của code:** Một dòng code thêm vào có thể làm chậm Query Database hoặc gây lỗi tiềm tàng ở một luồng khác.
+*   **Kỹ năng đọc Log và Debug:** Junior thường hay "đoán" lỗi thay vì đọc Log. Tôi dạy họ cách truy vết từ Log, sử dụng Debugger để hiểu luồng dữ liệu thay vì chỉ sửa mò.
+
+### 2. Cách giúp họ tránh lặp lại sai lầm
+Thay vì chỉ trích, tôi biến sai lầm thành tài liệu học tập:
+
+*   **Xây dựng Checklist cá nhân:** Sau mỗi lần Code Review, tôi yêu cầu các bạn ghi lại những lỗi mình mắc phải vào một file riêng. Trước khi gửi PR tiếp theo, các bạn phải tự đối chiếu với checklist đó.
+*   **Hỏi "Tại sao" thay vì đưa "Đáp án":** Khi thấy code có vấn đề, tôi thường hỏi: *"Em nghĩ điều gì sẽ xảy ra nếu dữ liệu này bị null?"* để các bạn tự tìm ra kẽ hở logic.
+*   **Pair Programming cho các task khó:** Tôi ngồi cùng các bạn để họ thấy cách tôi tư duy, cách tôi search tài liệu và cách tôi cấu trúc một hàm phức tạp.
+
+### 3. Trải nghiệm Mentoring mang lại kết quả tốt
+Tại dự án **Quản lý Cán bộ**, tôi từng mentor một bạn Junior rất sợ chạm vào code cũ của người tiền nhiệm:
+
+*   **Cách làm:** Tôi giao cho bạn nhiệm vụ viết **Unit Test** cho chính module cũ đó trước khi yêu cầu sửa logic.
+*   **Kết quả:** Việc viết Test giúp bạn hiểu sâu về logic mà không sợ làm hỏng hệ thống. Chỉ sau 2 tháng, bạn không những tự tin refactor code mà còn trở thành người nắm vững module đó nhất trong team.
+
+### 4. Quan điểm về việc học bền vững
+Tôi luôn nhấn mạnh với Junior rằng công nghệ thay đổi mỗi ngày, nhưng nguyên lý cốt lõi thì không:
+
+*   **Học từ gốc (Fundamentals):** Thay vì học framework mới nhất, tôi khuyến khích họ nắm vững Data Structures, Algorithms, và các Design Patterns cơ bản.
+*   **Viết code cho người đọc, không phải cho máy:** Tôi dạy họ rằng *"Code hay là code mà 6 tháng sau em đọc lại vẫn hiểu mình đã viết gì"*.
+*   **Chủ động (Proactive):** Một Junior giỏi là người biết đặt câu hỏi đúng lúc và biết cách tự tìm kiếm giải pháp trước khi nhờ hỗ trợ.
+
+---
+**Kết luận:** Mục tiêu cuối cùng của tôi khi mentor là khiến mình trở nên "thừa thãi". Khi một bạn Junior có thể tự tin đưa ra quyết định kỹ thuật và bảo vệ được nó, đó là lúc tôi thành công.
+
+
+
+---
+---
+# Các câu hỏi phỏng vấn kỹ năng thực tế 
+---
+---
+
+
